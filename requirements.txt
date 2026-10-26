@@ -1,0 +1,4 @@
+torch
+tokenizers>=0.20.0
+pyarrow
+numpy

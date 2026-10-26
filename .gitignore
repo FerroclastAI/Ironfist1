@@ -1,0 +1,105 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.python-version
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python packaging and build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+pip-wheel-metadata/
+
+# Testing, coverage, and type checking
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Secrets and environment variables
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+
+# Raw and processed training datasets
+data/raw/*
+data/processed/*
+data/tokenized/*
+
+# Keep data directory structure
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/tokenized/.gitkeep
+
+# Model checkpoints and training weights
+checkpoints/*
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.gguf
+*.ggml
+
+# Keep checkpoint directory structure
+!checkpoints/.gitkeep
+
+# Training logs and experiment tracking
+logs/*
+wandb/
+mlruns/
+runs/
+tensorboard/
+*.log
+
+# Generated tokenizer files
+tokenizer/vocab/*
+tokenizer/*.model
+tokenizer/*.bin
+
+# Keep tokenizer directory structure
+!tokenizer/vocab/.gitkeep
+
+# Temporary files and generated outputs
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.old
+
+# Profiling and performance outputs
+profiler/
+*.prof
