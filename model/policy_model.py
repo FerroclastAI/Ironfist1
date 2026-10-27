@@ -122,9 +122,11 @@ class PolicyModel(nn.Module):
         residual_scale = 1.0 / math.sqrt(2 * num_layers)
 
         with torch.no_grad():
-            for layer in self.layers:
-                layer.attention.output_projection.weight.mul_(residual_scale)
-                layer.mlp.down_projection.weight.mul_(residual_scale)
+            for name, parameter in self.named_parameters():
+                if name.endswith("attention.output_projection.weight"):
+                    parameter.mul_(residual_scale)
+                elif name.endswith("mlp.down_projection.weight"):
+                    parameter.mul_(residual_scale)
 
     @staticmethod
     def _initialize_weights(module: nn.Module) -> None:

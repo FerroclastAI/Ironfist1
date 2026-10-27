@@ -44,7 +44,7 @@ class TestMCTSNode(unittest.TestCase):
     def test_terminal_node_cannot_expand(self):
         node = MCTSNode(state="finished", is_terminal=True)
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError):
             node.expand([("another state", 1.0)])
 
 
@@ -100,7 +100,7 @@ class TestMCTSSearch(unittest.TestCase):
             candidate_generator=self.candidate_generator,
             evaluator=self.evaluator,
             config=self.config,
-            terminal_checker=lambda state: state.endswith("A A"),
+            terminal_checker=lambda state, depth: state.endswith("A A"),
         )
 
         result = search.search("start")

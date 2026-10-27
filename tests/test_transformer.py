@@ -1,47 +1,74 @@
 
+import unittest
+
 import torch
 
 from model.transformer import TransformerBlock
 
 
-def main():
-    batch_size = 2
-    sequence_length = 128
-    hidden_size = 1280
+class TestTransformerBlock(unittest.TestCase):
+    def setUp(self):
+        torch.manual_seed(42)
+        self.hidden_size = 64
+        self.block = TransformerBlock(
+            hidden_size=64,
+            num_attention_heads=4,
+            intermediate_size=128,
+            dropout=0.0,
+            attention_dropout=0.0,
+        )
 
-    block = TransformerBlock(
-        hidden_size=hidden_size,
-        num_attention_heads=20,
-        intermediate_size=5120,
-    )
+    def test_output_shape(self):
+        x = torch.randn(2, 10, self.hidden_size)
 
-    x = torch.randn(
-        batch_size,
-        sequence_length,
-        hidden_size,
-        requires_grad=True,
-    )
+        output = self.block(x)
 
-    output = block(x)
+        self.assertEqual(output.shape, x.shape)
 
-    assert output.shape == x.shape
-    assert torch.isfinite(output).all()
+    def test_output_is_finite(self):
+        x = torch.randn(2, 10, self.hidden_size)
 
-    output.square().mean().backward()
+        output = self.block(x)
 
-    assert x.grad is not None
-    assert torch.isfinite(x.grad).all()
+        self.assertTrue(torch.isfinite(output).all().item())
 
-    parameter_count = sum(
-        parameter.numel()
-        for parameter in block.parameters()
-    )
+    def test_gradient_flow(self):
+        x = torch.randn(
+            2, 10, self.hidden_size, requires_grad=True
+        )
 
-    print("Input shape:", tuple(x.shape))
-    print("Output shape:", tuple(output.shape))
-    print(f"Block parameters: {parameter_count:,}")
-    print("Transformer block test passed!")
+        output = self.block(x)
+        output.square().mean().backward()
+
+        self.assertIsNotNone(x.grad)
+        self.assertTrue(torch.isfinite(x.grad).all().item())
+
+        for parameter in self.block.parameters():
+            self.assertIsNotNone(parameter.grad)
+            self.assertTrue(
+                torch.isfinite(parameter.grad).all().item()
+            )
+
+    def test_padding_mask(self):
+        x = torch.randn(2, 8, self.hidden_size)
+        mask = torch.tensor([
+            [1, 1, 1, 1, 1, 0, 0, 0],
+            [1, 1, 1, 1, 1, 1, 1, 0],
+        ])
+
+        output = self.block(x, attention_mask=mask)
+
+        self.assertEqual(output.shape, x.shape)
+        self.assertTrue(torch.isfinite(output).all().item())
+
+    def test_single_token_sequence(self):
+        x = torch.randn(1, 1, self.hidden_size)
+
+        output = self.block(x)
+
+        self.assertEqual(output.shape, (1, 1, self.hidden_size))
+        self.assertTrue(torch.isfinite(output).all().item())
 
 
 if __name__ == "__main__":
-    main()
+    unittest.main()

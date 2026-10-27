@@ -1,48 +1,89 @@
 
+import unittest
 import torch
 
 from model.policy_model import PolicyModel
 
 
-def main():
-    torch.manual_seed(42)
+class TestPolicyModel(unittest.TestCase):
+    def setUp(self):
+        torch.manual_seed(42)
 
-    model = PolicyModel(
-        vocab_size=512,
-        hidden_size=64,
-        num_layers=2,
-        num_attention_heads=4,
-        intermediate_size=256,
-        max_seq_len=128,
-    )
+        self.vocab_size = 128
+        self.hidden_size = 64
 
-    input_ids = torch.randint(0, 512, (2, 32))
+        self.model = PolicyModel(
+            vocab_size=self.vocab_size,
+            hidden_size=self.hidden_size,
+            num_layers=2,
+            num_attention_heads=4,
+            intermediate_size=128,
+            max_seq_len=32,
+            dropout=0.0,
+            attention_dropout=0.0,
+            tie_word_embeddings=True,
+        )
 
-    # The data loader's labels are already shifted by one token.
-    labels = torch.randint(0, 512, (2, 32))
+    def test_logits_shape(self):
+        input_ids = torch.randint(0, self.vocab_size, (2, 12))
+        logits = self.model(input_ids)
 
-    logits, loss = model(input_ids, labels=labels)
+        self.assertEqual(logits.shape, (2, 12, self.vocab_size))
 
-    assert logits.shape == (2, 32, 512)
-    assert loss.ndim == 0
-    assert torch.isfinite(loss)
+    def test_loss_is_finite(self):
+        input_ids = torch.randint(0, self.vocab_size, (2, 12))
+        labels = torch.randint(0, self.vocab_size, (2, 12))
 
-    loss.backward()
+        logits, loss = self.model(input_ids, labels=labels)
 
-    assert model.token_embeddings.embedding.weight.grad is not None
+        self.assertEqual(logits.shape, (2, 12, self.vocab_size))
+        self.assertTrue(torch.isfinite(loss).item())
+        self.assertGreater(loss.item(), 0.0)
 
-    # Verify that input embeddings and output weights are shared.
-    assert (
-        model.token_embeddings.embedding.weight
-        is model.lm_head.weight
-    )
+    def test_gradient_flow(self):
+        input_ids = torch.randint(0, self.vocab_size, (2, 12))
+        labels = torch.randint(0, self.vocab_size, (2, 12))
 
-    print("Logits shape:", tuple(logits.shape))
-    print("Training loss:", round(loss.item(), 4))
-    print(f"Parameters: {model.count_parameters():,}")
-    print("Weight tying check passed!")
-    print("Policy model test passed!")
+        logits, loss = self.model(input_ids, labels=labels)
+        loss.backward()
+
+        gradients = [
+            parameter.grad
+            for parameter in self.model.parameters()
+            if parameter.requires_grad
+        ]
+
+        self.assertTrue(any(grad is not None for grad in gradients))
+
+        for grad in gradients:
+            if grad is not None:
+                self.assertTrue(torch.isfinite(grad).all().item())
+
+    def test_tied_embeddings(self):
+        self.assertIs(
+            self.model.lm_head.weight,
+            self.model.token_embeddings.embedding.weight,
+        )
+
+    def test_different_sequence_lengths(self):
+        for seq_length in (1, 8, 16):
+            with self.subTest(seq_length=seq_length):
+                input_ids = torch.randint(
+                    0, self.vocab_size, (2, seq_length)
+                )
+                logits = self.model(input_ids)
+
+                self.assertEqual(
+                    logits.shape,
+                    (2, seq_length, self.vocab_size),
+                )
+
+    def test_invalid_token_id_raises(self):
+        input_ids = torch.tensor([[self.vocab_size]])
+
+        with self.assertRaises(ValueError):
+            self.model(input_ids)
 
 
 if __name__ == "__main__":
-    main()
+    unittest.main()
