@@ -10,7 +10,7 @@ from typing import Iterator
 
 import numpy as np
 import torch
-from torch.utils.data import IterableDataset, DataLoader, get_worker_info
+from torch.utils.data import DataLoader, IterableDataset, get_worker_info
 
 
 class TokenShardDataset(IterableDataset):
@@ -18,8 +18,8 @@ class TokenShardDataset(IterableDataset):
     Streams token sequences from .npy shards.
 
     Each sample contains:
-        input_ids: tokens [0 : seq_length]
-        labels:    tokens [1 : seq_length + 1]
+        input_ids: tokens [start : start + seq_length]
+        labels:    tokens [start + 1 : start + seq_length + 1]
     """
 
     def __init__(
@@ -32,7 +32,7 @@ class TokenShardDataset(IterableDataset):
 
         self.shard_dir = Path(shard_dir)
         self.seq_length = seq_length
-        self.stride = stride or seq_length
+        self.stride = seq_length if stride is None else stride
 
         if self.seq_length <= 0:
             raise ValueError("seq_length must be positive.")
@@ -45,7 +45,9 @@ class TokenShardDataset(IterableDataset):
                 f"Token shard directory not found: {self.shard_dir}"
             )
 
-        self.shard_paths = sorted(self.shard_dir.glob("shard_*.npy"))
+        self.shard_paths = sorted(
+            self.shard_dir.glob("shard_*.npy")
+        )
 
         if not self.shard_paths:
             raise FileNotFoundError(
@@ -58,7 +60,7 @@ class TokenShardDataset(IterableDataset):
         if worker_info is None:
             shard_paths = self.shard_paths
         else:
-            # Give each worker different shards to avoid duplicates.
+            # Assign different shards to each worker.
             shard_paths = self.shard_paths[
                 worker_info.id::worker_info.num_workers
             ]
@@ -70,12 +72,24 @@ class TokenShardDataset(IterableDataset):
 
             if tokens.ndim != 1:
                 raise ValueError(
-                    f"Expected one-dimensional token array: {shard_path}"
+                    f"Expected a one-dimensional token array: {shard_path}"
                 )
 
-            # Non-overlapping windows. Each window has one extra token
-            # so labels are the next-token targets.
-            for start in range(0, len(tokens) - window_size + 1, self.stride):
+            if not np.issubdtype(tokens.dtype, np.integer):
+                raise TypeError(
+                    f"Expected integer token IDs in {shard_path}, "
+                    f"got {tokens.dtype}."
+                )
+
+            if len(tokens) < window_size:
+                continue
+
+            for start in range(
+                0,
+                len(tokens) - window_size + 1,
+                self.stride,
+            ):
+                # Copy the window so PyTorch owns writable memory.
                 window = np.array(
                     tokens[start : start + window_size],
                     dtype=np.int64,
@@ -98,6 +112,12 @@ def create_dataloader(
     num_workers: int = 0,
     pin_memory: bool = True,
 ) -> DataLoader:
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive.")
+
+    if num_workers < 0:
+        raise ValueError("num_workers cannot be negative.")
+
     dataset = TokenShardDataset(
         shard_dir=shard_dir,
         seq_length=seq_length,
