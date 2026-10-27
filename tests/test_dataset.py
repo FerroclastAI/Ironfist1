@@ -14,8 +14,6 @@ class TestTokenShardDataset(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.shard_dir = Path(self.temp_dir.name)
 
-        # Tokens are deliberately sequential so window boundaries
-        # and next-token labels are easy to verify.
         tokens = np.arange(20, dtype=np.int64)
         np.save(self.shard_dir / "shard_000.npy", tokens)
 
@@ -23,31 +21,18 @@ class TestTokenShardDataset(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_first_window_and_next_token_labels(self):
-        dataset = TokenShardDataset(
-            self.shard_dir,
-            seq_length=4,
-        )
-
+        dataset = TokenShardDataset(self.shard_dir, seq_length=4)
         sample = next(iter(dataset))
 
         self.assertTrue(
-            torch.equal(
-                sample["input_ids"],
-                torch.tensor([0, 1, 2, 3]),
-            )
+            torch.equal(sample["input_ids"], torch.tensor([0, 1, 2, 3]))
         )
         self.assertTrue(
-            torch.equal(
-                sample["labels"],
-                torch.tensor([1, 2, 3, 4]),
-            )
+            torch.equal(sample["labels"], torch.tensor([1, 2, 3, 4]))
         )
 
     def test_sample_shapes_and_dtypes(self):
-        dataset = TokenShardDataset(
-            self.shard_dir,
-            seq_length=5,
-        )
+        dataset = TokenShardDataset(self.shard_dir, seq_length=5)
 
         for sample in dataset:
             self.assertEqual(sample["input_ids"].shape, (5,))
@@ -56,15 +41,9 @@ class TestTokenShardDataset(unittest.TestCase):
             self.assertEqual(sample["labels"].dtype, torch.int64)
 
     def test_default_stride(self):
-        dataset = TokenShardDataset(
-            self.shard_dir,
-            seq_length=4,
-        )
-
+        dataset = TokenShardDataset(self.shard_dir, seq_length=4)
         samples = list(dataset)
 
-        # 20 tokens produce windows of 5 tokens each.
-        # With stride 4, there are four complete windows.
         self.assertEqual(len(samples), 4)
 
     def test_custom_stride(self):
@@ -73,12 +52,9 @@ class TestTokenShardDataset(unittest.TestCase):
             seq_length=4,
             stride=2,
         )
-
         samples = list(dataset)
 
-        # Valid starts are 0, 2, 4, 6, 8, 10, 12, 14.
         self.assertEqual(len(samples), 8)
-
         self.assertTrue(
             torch.equal(
                 samples[1]["input_ids"],
@@ -87,11 +63,7 @@ class TestTokenShardDataset(unittest.TestCase):
         )
 
     def test_last_window_ends_at_final_token(self):
-        dataset = TokenShardDataset(
-            self.shard_dir,
-            seq_length=4,
-        )
-
+        dataset = TokenShardDataset(self.shard_dir, seq_length=4)
         samples = list(dataset)
 
         self.assertTrue(
@@ -113,21 +85,44 @@ class TestTokenShardDataset(unittest.TestCase):
             np.arange(100, 110, dtype=np.int64),
         )
 
-        dataset = TokenShardDataset(
-            self.shard_dir,
-            seq_length=4,
-        )
-
+        dataset = TokenShardDataset(self.shard_dir, seq_length=4)
         samples = list(dataset)
 
-        # First shard: four windows.
-        # Second shard: one complete window.
-        self.assertEqual(len(samples), 5)
+        # The first shard produces 4 windows; the second produces 2.
+        self.assertEqual(len(samples), 6)
+
+        # Identify samples from the second shard by their starting token.
+        second_shard_samples = [
+            sample
+            for sample in samples
+            if sample["input_ids"][0].item() >= 100
+        ]
+
+        self.assertEqual(len(second_shard_samples), 2)
 
         self.assertTrue(
             torch.equal(
-                samples[-1]["input_ids"],
+                second_shard_samples[0]["input_ids"],
                 torch.tensor([100, 101, 102, 103]),
+            )
+        )
+        self.assertTrue(
+            torch.equal(
+                second_shard_samples[0]["labels"],
+                torch.tensor([101, 102, 103, 104]),
+            )
+        )
+
+        self.assertTrue(
+            torch.equal(
+                second_shard_samples[1]["input_ids"],
+                torch.tensor([104, 105, 106, 107]),
+            )
+        )
+        self.assertTrue(
+            torch.equal(
+                second_shard_samples[1]["labels"],
+                torch.tensor([105, 106, 107, 108]),
             )
         )
 
@@ -140,11 +135,7 @@ class TestTokenShardDataset(unittest.TestCase):
             np.array([1, 2, 3, 4], dtype=np.int64),
         )
 
-        dataset = TokenShardDataset(
-            short_dir,
-            seq_length=4,
-        )
-
+        dataset = TokenShardDataset(short_dir, seq_length=4)
         self.assertEqual(list(dataset), [])
 
     def test_invalid_sequence_length_raises(self):
@@ -156,18 +147,10 @@ class TestTokenShardDataset(unittest.TestCase):
 
     def test_invalid_stride_raises(self):
         with self.assertRaises(ValueError):
-            TokenShardDataset(
-                self.shard_dir,
-                seq_length=4,
-                stride=0,
-            )
+            TokenShardDataset(self.shard_dir, seq_length=4, stride=0)
 
         with self.assertRaises(ValueError):
-            TokenShardDataset(
-                self.shard_dir,
-                seq_length=4,
-                stride=-1,
-            )
+            TokenShardDataset(self.shard_dir, seq_length=4, stride=-1)
 
     def test_missing_directory_raises(self):
         missing_dir = self.shard_dir / "does_not_exist"
@@ -191,10 +174,7 @@ class TestTokenShardDataset(unittest.TestCase):
             np.array([1.0, 2.0, 3.0, 4.0, 5.0]),
         )
 
-        dataset = TokenShardDataset(
-            invalid_dir,
-            seq_length=4,
-        )
+        dataset = TokenShardDataset(invalid_dir, seq_length=4)
 
         with self.assertRaises(TypeError):
             list(dataset)
@@ -208,10 +188,7 @@ class TestTokenShardDataset(unittest.TestCase):
             np.ones((4, 4), dtype=np.int64),
         )
 
-        dataset = TokenShardDataset(
-            invalid_dir,
-            seq_length=2,
-        )
+        dataset = TokenShardDataset(invalid_dir, seq_length=2)
 
         with self.assertRaises(ValueError):
             list(dataset)
