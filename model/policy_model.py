@@ -123,7 +123,7 @@ class PolicyModel(nn.Module):
 
         with torch.no_grad():
             for name, parameter in self.named_parameters():
-                if name.endswith("attention.output_projection.weight"):
+                if name.endswith("attention.out_proj.weight"):
                     parameter.mul_(residual_scale)
                 elif name.endswith("mlp.down_projection.weight"):
                     parameter.mul_(residual_scale)

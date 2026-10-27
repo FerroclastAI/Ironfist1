@@ -20,11 +20,6 @@ from typing import Any, Iterator
 import numpy as np
 
 try:
-    from . import _unused  # noqa: F401
-except ImportError:
-    pass
-
-try:
     from tokenizer.tokenizer import WordPieceTokenizer
 except ImportError:
     # Supports running this file directly from the project root.
