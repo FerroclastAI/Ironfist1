@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.so
 .python-version
+*.npy
 
 # Virtual environments
 .venv/
@@ -29,6 +30,7 @@ htmlcov/
 .mypy_cache/
 .pyright/
 .ruff_cache/
+data/tokenized_smoke/metadata.json
 
 # Jupyter
 .ipynb_checkpoints/
