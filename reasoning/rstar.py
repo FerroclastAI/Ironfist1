@@ -8,7 +8,7 @@ from reasoning.discriminator import DiscriminatorScorer
 from reasoning.mcts.search import MCTSConfig, MCTSResult, MCTSSearch
 from reasoning.policy import PolicyCandidateGenerator
 from reasoning.reward import RewardConfig, calculate_reward
-
+from functools import lru_cache
 
 @dataclass
 class RStarConfig:
@@ -141,9 +141,16 @@ class RStarReasoner:
 
         return penalty
 
+
     def _reward(self, state: str) -> tuple[float, float]:
-        """Calculate the combined reward for a candidate state."""
-        discriminator_score = self.discriminator.score(state)
+        """Calculate a validated reward for a candidate state."""
+        discriminator_score = float(self.discriminator.score(state))
+
+        if not math.isfinite(discriminator_score):
+            raise ValueError(
+                "Discriminator returned a non-finite score"
+            )
+
         consistency = self._consistency_score(state)
         penalty = self._penalty(state)
 
@@ -154,21 +161,31 @@ class RStarReasoner:
             config=self.reward_config,
         )
 
-        return float(reward), discriminator_score
+        reward = float(reward)
 
+        if not math.isfinite(reward):
+            raise ValueError("Calculated reward must be finite")
+
+        return reward, discriminator_score
+
+  
     def reason(self, prompt: str) -> RStarResult:
         """
         Search for a high-scoring reasoning continuation.
 
-        Returns a structured result containing the selected answer,
-        its scores, and the MCTS search statistics.
+        Cache evaluations so repeated visits to the same state do not
+        repeatedly invoke the discriminator and optional checkers.
         """
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("prompt must be a non-empty string")
 
+        @lru_cache(maxsize=4096)
+        def evaluate_details(state: str) -> tuple[float, float]:
+            reward, discriminator_score = self._reward(state)
+            return reward, discriminator_score
+
         def evaluate(state: str) -> float:
-            reward, _ = self._reward(state)
-            return reward
+            return evaluate_details(state)[0]
 
         search = MCTSSearch(
             candidate_generator=self.policy_generator,
@@ -177,11 +194,8 @@ class RStarReasoner:
         )
 
         search_result = search.search(prompt)
-
         selected_state = search_result.best_state
 
-        # Candidate states contain the original prompt plus generated text.
-        # Remove the prompt prefix for the user-facing continuation.
         if selected_state.startswith(prompt):
             answer = selected_state[len(prompt):].strip()
         else:
@@ -190,7 +204,7 @@ class RStarReasoner:
         if not answer:
             answer = selected_state
 
-        final_reward, final_discriminator_score = self._reward(
+        final_reward, final_discriminator_score = evaluate_details(
             selected_state
         )
 
@@ -201,6 +215,7 @@ class RStarReasoner:
             discriminator_score=final_discriminator_score,
             search_result=search_result,
         )
+
 
     def __call__(self, prompt: str) -> str:
         """Return just the selected answer for simple chat integration."""
