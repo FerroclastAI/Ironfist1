@@ -3,14 +3,20 @@
 
 import math
 import unittest
+from collections.abc import Callable, Sequence
 
 from reasoning.mcts.search import MCTSConfig, MCTSSearch
 
+CandidateList = Sequence[tuple[str, float]]
+
 class FakePolicy:
-    def __init__(self, candidates=None):
+    def __init__(
+        self,
+        candidates: dict[str, CandidateList] | Callable[[str, int], CandidateList] | None = None,
+    ):
         self.candidates = {} if candidates is None else candidates
 
-    def __call__(self, state: str, count: int):
+    def __call__(self, state: str, count: int) -> CandidateList:
         if callable(self.candidates):
             return self.candidates(state, count)
         return self.candidates.get(state, [])
