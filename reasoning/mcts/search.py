@@ -275,14 +275,20 @@ class MCTSSearch:
             simulations_completed += 1
 
         # Select the most-visited root child as the final candidate.
-        best_child = root.most_visited_child()
-
-        if best_child is None:
+       
+        # Select the root candidate with the highest average search value.
+        # Break ties by preferring the more-visited candidate.
+        if not root.children:
             best_state = initial_state
             best_value = root.value
         else:
+            best_child = max(
+                root.children.values(),
+                key=lambda child: (child.value, child.visit_count),
+            )
             best_state = best_child.state
             best_value = best_child.value
+
 
         return MCTSResult(
             root=root,

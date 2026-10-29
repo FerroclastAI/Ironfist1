@@ -1,0 +1,11 @@
+{
+  "format": "numpy_int32_token_shards",
+  "tokenizer_type": "wordpiece",
+  "vocab_size": 32000,
+  "seq_length": 2048,
+  "tokens_per_shard": 10000000,
+  "total_records": 644503,
+  "total_tokens": 488927480,
+  "saved_tokens": 488927480,
+  "shard_count": 49
+}
