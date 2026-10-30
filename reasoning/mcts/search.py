@@ -296,3 +296,14 @@ class MCTSSearch:
             best_value=best_value,
             simulations_completed=simulations_completed,
         )
+
+@dataclass
+class MCTSDiagnostics:
+    """Statistics describing an MCTS search."""
+
+    nodes_explored: int = 0
+    candidates_evaluated: int = 0
+    terminal_nodes: int = 0
+    maximum_depth_reached: int = 0
+    unique_states: int = 0
+    average_reward: float = 0.0
