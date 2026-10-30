@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Callable, Sequence
 
 from reasoning.mcts.node import MCTSNode
-
+from reasoning.mcts.trace import MCTSTrace
 
 # Generates complete candidate states and their policy probabilities.
 CandidateGenerator = Callable[
@@ -67,7 +67,7 @@ class MCTSResult:
     best_value: float
     simulations_completed: int
     diagnostics: MCTSDiagnostics
-
+    trace: MCTSTrace
     @property
     def best_path(self) -> list[str]:
         """Return the states along the most-visited path."""
@@ -190,6 +190,26 @@ class MCTSSearch:
             node = child
             depth += 1
 
+        all_nodes = []
+
+        def collect_nodes(node):
+            all_nodes.append(node)
+            for child in node.children.values():
+                collect_nodes(child)
+
+        collect_nodes(root)
+
+        diagnostics = MCTSDiagnostics(
+            nodes_explored=len(all_nodes),
+            candidates_evaluated=candidates_evaluated,
+            terminal_nodes=sum(
+                node.is_terminal for node in all_nodes
+            ),
+            maximum_depth_reached=maximum_depth_reached,
+            unique_states=len(evaluated_states),
+            average_reward=reward_sum / candidates_evaluated,
+        )
+
         return node, depth
 
     def search(self, initial_state: str) -> MCTSResult:
@@ -310,6 +330,7 @@ class MCTSSearch:
             best_state=best_state,
             best_value=best_value,
             simulations_completed=simulations_completed,
+            diagnostics=diagnostics,
         )
 
 @dataclass
@@ -322,3 +343,4 @@ class MCTSDiagnostics:
     maximum_depth_reached: int = 0
     unique_states: int = 0
     average_reward: float = 0.0
+
