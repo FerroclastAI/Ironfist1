@@ -222,7 +222,13 @@ class MCTSSearch:
         """
         if not isinstance(initial_state, str):
             raise TypeError("initial_state must be a string")
-
+        trace = MCTSTrace()
+        trace.record(
+            state=initial_state,
+            depth=0,
+            event="root_evaluated",
+            reward=root_reward,
+        )
         root = MCTSNode(state=initial_state)
         root_reward = self._evaluate(initial_state)
         root.update(root_reward)
@@ -251,6 +257,13 @@ class MCTSSearch:
 
             candidates = self._generate_candidates(leaf, depth)
 
+            for candidate_state, prior in candidates:
+                trace.record(
+                    state=candidate_state,
+                    depth=depth + 1,
+                    event="candidate_generated",
+                    prior=prior,
+                )
             if not candidates:
                 leaf.is_terminal = True
                 leaf_reward = self._evaluate(leaf.state)
@@ -289,6 +302,14 @@ class MCTSSearch:
 
             child_reward = self._evaluate(child.state)
 
+            trace.record(
+                state=child.state,
+                depth=child_depth,
+                event="candidate_evaluated",
+                reward=child_reward,
+                prior=child.prior,
+            )
+
             if child.state not in evaluated_states:
                 evaluated_states.add(child.state)
                 candidates_evaluated += 1
@@ -323,7 +344,7 @@ class MCTSSearch:
             )
             best_state = best_child.state
             best_value = best_child.value
-
+            trace.mark_selected(best_state)
 
         return MCTSResult(
             root=root,
@@ -331,6 +352,7 @@ class MCTSSearch:
             best_value=best_value,
             simulations_completed=simulations_completed,
             diagnostics=diagnostics,
+            trace=trace,
         )
 
 @dataclass
