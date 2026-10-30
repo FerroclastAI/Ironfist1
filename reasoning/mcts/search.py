@@ -206,6 +206,10 @@ class MCTSSearch:
         root = MCTSNode(state=initial_state)
         root_reward = self._evaluate(initial_state)
         root.update(root_reward)
+        evaluated_states = {initial_state}
+        reward_sum = root_reward
+        candidates_evaluated = 1
+        maximum_depth_reached = 0
 
         simulations_completed = 0
 
@@ -264,6 +268,16 @@ class MCTSSearch:
             )
 
             child_reward = self._evaluate(child.state)
+
+            if child.state not in evaluated_states:
+                evaluated_states.add(child.state)
+                candidates_evaluated += 1
+                reward_sum += child_reward
+
+            maximum_depth_reached = max(
+                maximum_depth_reached,
+                child_depth,
+            )
 
             # Apply discount according to how far this candidate is from
             # the root. All ancestors receive the same discounted outcome.
