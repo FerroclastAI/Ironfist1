@@ -1,13 +1,22 @@
 
 from __future__ import annotations
-
+from reasoning.mcts.trace import MCTSTrace
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
 from reasoning.mcts.node import MCTSNode
 from reasoning.mcts.trace import MCTSTrace
+
+@dataclass
+class MCTSDiagnostics:
+    nodes_explored: int = 0
+    candidates_evaluated: int = 0
+    terminal_nodes: int = 0
+    maximum_depth_reached: int = 0
+    unique_states: int = 0
+    average_reward: float = 0.0
 
 # Generates complete candidate states and their policy probabilities.
 CandidateGenerator = Callable[
@@ -59,31 +68,23 @@ class MCTSConfig:
 
 
 @dataclass
+@dataclass
 class MCTSResult:
-    """Summary of a completed MCTS run."""
-
     root: MCTSNode
     best_state: str
     best_value: float
     simulations_completed: int
     diagnostics: MCTSDiagnostics
     trace: MCTSTrace
+
     @property
     def best_path(self) -> list[str]:
-        """Return the states along the most-visited path."""
-        path: list[str] = []
+        path = [self.root.state]
         node = self.root
 
-        while node.children:
-            child = node.most_visited_child()
-            if child is None:
-                break
-
-            path.append(child.state)
-            node = child
-
-            if node.is_terminal:
-                break
+        while node.most_visited_child is not None:
+            node = node.most_visited_child
+            path.append(node.state)
 
         return path
 
