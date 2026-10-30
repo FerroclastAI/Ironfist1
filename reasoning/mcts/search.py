@@ -66,6 +66,7 @@ class MCTSResult:
     best_state: str
     best_value: float
     simulations_completed: int
+    diagnostics: MCTSDiagnostics
 
     @property
     def best_path(self) -> list[str]:
