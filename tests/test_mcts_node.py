@@ -96,7 +96,7 @@ class TestMCTSNode(unittest.TestCase):
         ])
 
         visited, unvisited = children
-        visited.update(1.0)
+        visited.update(0.0)
         root.update(1.0)
 
         self.assertGreater(

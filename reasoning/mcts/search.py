@@ -1,13 +1,35 @@
 
 from __future__ import annotations
-from reasoning.mcts.trace import MCTSTrace
+
 import math
 import random
-from dataclasses import dataclass, field
-from typing import Callable, Sequence
+from dataclasses import dataclass
 
 from reasoning.mcts.node import MCTSNode
 from reasoning.mcts.trace import MCTSTrace
+
+
+@dataclass
+class MCTSConfig:
+    num_simulations: int = 32
+    max_search_depth: int = 8
+    max_candidates_per_node: int = 4
+    exploration_constant: float = 1.414
+    discount_factor: float = 0.99
+    random_seed: int | None = None
+
+    def __post_init__(self):
+        if self.num_simulations < 1:
+            raise ValueError("num_simulations must be >= 1")
+        if self.max_search_depth < 1:
+            raise ValueError("max_search_depth must be >= 1")
+        if self.max_candidates_per_node < 1:
+            raise ValueError("max_candidates_per_node must be >= 1")
+        if not math.isfinite(self.exploration_constant) or self.exploration_constant < 0:
+            raise ValueError("exploration_constant must be finite and >= 0")
+        if not math.isfinite(self.discount_factor) or not 0 <= self.discount_factor <= 1:
+            raise ValueError("discount_factor must be between 0 and 1")
+
 
 @dataclass
 class MCTSDiagnostics:
@@ -18,56 +40,7 @@ class MCTSDiagnostics:
     unique_states: int = 0
     average_reward: float = 0.0
 
-# Generates complete candidate states and their policy probabilities.
-CandidateGenerator = Callable[
-    [str, int],
-    Sequence[tuple[str, float]],
-]
 
-# Evaluates a complete state and returns a scalar reward.
-StateEvaluator = Callable[[str], float]
-
-# Determines whether a state should terminate the search.
-TerminalChecker = Callable[[str, int], bool]
-
-
-@dataclass
-class MCTSConfig:
-    """Settings for single-agent reasoning search."""
-
-    num_simulations: int = 32
-    max_search_depth: int = 8
-    max_candidates_per_node: int = 4
-    exploration_constant: float = 1.414
-    discount_factor: float = 0.99
-    random_seed: int | None = None
-
-    def __post_init__(self) -> None:
-        if self.num_simulations < 1:
-            raise ValueError("num_simulations must be at least 1")
-
-        if self.max_search_depth < 1:
-            raise ValueError("max_search_depth must be at least 1")
-
-        if self.max_candidates_per_node < 1:
-            raise ValueError("max_candidates_per_node must be at least 1")
-
-        if (
-            not math.isfinite(self.exploration_constant)
-            or self.exploration_constant < 0
-        ):
-            raise ValueError(
-                "exploration_constant must be finite and non-negative"
-            )
-
-        if (
-            not math.isfinite(self.discount_factor)
-            or not 0 <= self.discount_factor <= 1
-        ):
-            raise ValueError("discount_factor must be between 0 and 1")
-
-
-@dataclass
 @dataclass
 class MCTSResult:
     root: MCTSNode
@@ -90,262 +63,271 @@ class MCTSResult:
 
 
 class MCTSSearch:
-    """
-    Monte Carlo Tree Search for single-agent reasoning.
-
-    The caller supplies:
-      - candidate_generator: produces complete next-state candidates.
-      - evaluator: scores the quality of a complete state.
-      - terminal_checker: optionally detects completed reasoning paths.
-
-    The evaluator should return higher values for better reasoning states.
-    """
-
     def __init__(
         self,
-        candidate_generator: CandidateGenerator,
-        evaluator: StateEvaluator,
+        candidate_generator,
+        evaluator,
         config: MCTSConfig | None = None,
-        terminal_checker: TerminalChecker | None = None,
-    ) -> None:
+        terminal_checker=None,
+    ):
         self.candidate_generator = candidate_generator
         self.evaluator = evaluator
         self.config = config or MCTSConfig()
-        self.terminal_checker = terminal_checker
+        self.terminal_checker = terminal_checker or (lambda state, depth: False)
+
         self.rng = random.Random(self.config.random_seed)
 
+    def _evaluate(self, state: str) -> float:
+        reward = float(self.evaluator(state))
+
+        if not math.isfinite(reward):
+            raise ValueError("Evaluator returned a non-finite reward")
+
+        return reward
+
     def _is_terminal(self, state: str, depth: int) -> bool:
-        if depth >= self.config.max_search_depth:
-            return True
+        return bool(self.terminal_checker(state, depth))
 
-        if self.terminal_checker is not None:
-            return bool(self.terminal_checker(state, depth))
-
-        return False
-
-    def _generate_candidates(
-        self,
-        node: MCTSNode,
-        depth: int,
-    ) -> list[tuple[str, float]]:
-        """Generate and validate the candidates for a node."""
+    def _generate_candidates(self, node: MCTSNode) -> list[tuple[str, float]]:
         candidates = self.candidate_generator(
             node.state,
             self.config.max_candidates_per_node,
         )
 
-        validated: list[tuple[str, float]] = []
-        seen: set[str] = set()
+        if candidates is None:
+            return []
 
-        for state, prior in candidates:
+        validated = []
+        seen = set()
+
+        for candidate in candidates:
+            if not isinstance(candidate, (tuple, list)) or len(candidate) != 2:
+                raise ValueError("Candidates must be (state, prior) pairs")
+
+            state, prior = candidate
+
             if not isinstance(state, str):
-                raise TypeError("Candidate states must be strings")
+                raise TypeError("Candidate state must be a string")
+
+            prior = float(prior)
 
             if not math.isfinite(prior) or prior < 0:
-                raise ValueError(
-                    "Candidate probabilities must be finite "
-                    "and non-negative"
-                )
+                raise ValueError("Candidate prior must be finite and >= 0")
 
-            if state in seen:
+            if state == node.state or state in seen:
                 continue
 
             seen.add(state)
-
-            # A state identical to its parent would create a pointless loop.
-            if state == node.state:
-                continue
-
-            validated.append((state, float(prior)))
+            validated.append((state, prior))
 
             if len(validated) >= self.config.max_candidates_per_node:
                 break
 
         return validated
 
-    def _evaluate(self, state: str) -> float:
-        """Evaluate a state and reject invalid reward values."""
-        value = float(self.evaluator(state))
-
-        if not math.isfinite(value):
-            raise ValueError("The evaluator returned a non-finite reward")
-
-        return value
-
-    def _select_leaf(self, root: MCTSNode) -> tuple[MCTSNode, int]:
-        """Follow the best-child policy until reaching a leaf."""
-        node = root
+    def _depth(self, node: MCTSNode) -> int:
         depth = 0
+        while node.parent is not None:
+            depth += 1
+            node = node.parent
+        return depth
+
+    def _select_leaf(self, root: MCTSNode) -> MCTSNode:
+        node = root
 
         while node.is_expanded and not node.is_terminal:
-            if depth >= self.config.max_search_depth:
+            if self._depth(node) >= self.config.max_search_depth:
                 break
 
-            child = node.best_child(
-                self.config.exploration_constant
-            )
+            child = node.best_child(self.config.exploration_constant)
 
             if child is None:
                 break
 
             node = child
-            depth += 1
 
-        all_nodes = []
+        return node
 
-        def collect_nodes(node):
-            all_nodes.append(node)
-            for child in node.children.values():
-                collect_nodes(child)
+    def _collect_nodes(self, root: MCTSNode) -> list[MCTSNode]:
+        nodes = []
+        stack = [root]
 
-        collect_nodes(root)
+        while stack:
+            node = stack.pop()
+            nodes.append(node)
+            stack.extend(node.children.values())
 
-        diagnostics = MCTSDiagnostics(
-            nodes_explored=len(all_nodes),
-            candidates_evaluated=candidates_evaluated,
-            terminal_nodes=sum(
-                node.is_terminal for node in all_nodes
-            ),
-            maximum_depth_reached=maximum_depth_reached,
-            unique_states=len(evaluated_states),
-            average_reward=reward_sum / candidates_evaluated,
-        )
-
-        return node, depth
+        return nodes
 
     def search(self, initial_state: str) -> MCTSResult:
-        """
-        Run MCTS from an initial prompt or reasoning state.
-
-        The root's value is evaluated first. Each simulation then selects
-        a leaf, expands it if possible, evaluates a resulting state, and
-        backs up the discounted reward through the selected path.
-        """
         if not isinstance(initial_state, str):
             raise TypeError("initial_state must be a string")
+
         trace = MCTSTrace()
+        evaluated_rewards = []
+        evaluated_states = set()
+        candidates_evaluated = 0
+        terminal_nodes = 0
+        maximum_depth = 0
+
+        root = MCTSNode(state=initial_state)
+        root_reward = self._evaluate(initial_state)
+
+        evaluated_rewards.append(root_reward)
+        evaluated_states.add(initial_state)
+        candidates_evaluated += 1
+        root.update(root_reward)
+
         trace.record(
             state=initial_state,
             depth=0,
             event="root_evaluated",
             reward=root_reward,
         )
-        root = MCTSNode(state=initial_state)
-        root_reward = self._evaluate(initial_state)
-        root.update(root_reward)
-        evaluated_states = {initial_state}
-        reward_sum = root_reward
-        candidates_evaluated = 1
-        maximum_depth_reached = 0
 
         simulations_completed = 0
 
         for _ in range(self.config.num_simulations):
-            leaf, depth = self._select_leaf(root)
+            leaf = self._select_leaf(root)
+            depth = self._depth(leaf)
+            maximum_depth = max(maximum_depth, depth)
 
             if leaf.is_terminal:
-                leaf_reward = self._evaluate(leaf.state)
-                leaf.backpropagate(leaf_reward)
+                terminal_nodes += 1
+                reward = self._evaluate(leaf.state)
+                evaluated_rewards.append(reward)
+                candidates_evaluated += 1
+                leaf.backpropagate(reward)
+
+                trace.record(
+                    state=leaf.state,
+                    depth=depth,
+                    event="terminal_evaluated",
+                    reward=reward,
+                )
+
                 simulations_completed += 1
                 continue
 
             if depth >= self.config.max_search_depth:
-                leaf.is_terminal = True
-                leaf_reward = self._evaluate(leaf.state)
-                leaf.backpropagate(leaf_reward)
+                reward = self._evaluate(leaf.state)
+                evaluated_rewards.append(reward)
+                candidates_evaluated += 1
+                leaf.backpropagate(reward)
+
+                trace.record(
+                    state=leaf.state,
+                    depth=depth,
+                    event="depth_limit",
+                    reward=reward,
+                )
+
                 simulations_completed += 1
                 continue
 
-            candidates = self._generate_candidates(leaf, depth)
+            candidates = self._generate_candidates(leaf)
 
-            for candidate_state, prior in candidates:
-                trace.record(
-                    state=candidate_state,
-                    depth=depth + 1,
-                    event="candidate_generated",
-                    prior=prior,
-                )
             if not candidates:
+                reward = self._evaluate(leaf.state)
+                evaluated_rewards.append(reward)
+                candidates_evaluated += 1
                 leaf.is_terminal = True
-                leaf_reward = self._evaluate(leaf.state)
-                leaf.backpropagate(leaf_reward)
+                terminal_nodes += 1
+                leaf.backpropagate(reward)
+
+                trace.record(
+                    state=leaf.state,
+                    depth=depth,
+                    event="no_candidates",
+                    reward=reward,
+                )
+
                 simulations_completed += 1
                 continue
 
             children = leaf.expand(candidates)
 
-            # Prefer children created by this expansion. If all candidates
-            # already existed, select among the existing children instead.
-            unvisited = [child for child in children if child.visit_count == 0]
+            for child in children:
+                trace.record(
+                    state=child.state,
+                    depth=depth + 1,
+                    event="candidate_generated",
+                    prior=child.prior,
+                )
+
+            unvisited = [
+                child for child in children
+                if child.visit_count == 0
+            ]
 
             if unvisited:
-                child = max(
-                    unvisited,
-                    key=lambda item: item.prior
-                    + self.rng.random() * 1e-12,
-                )
+                child = max(unvisited, key=lambda item: item.prior)
             else:
-                child = leaf.best_child(
-                    self.config.exploration_constant
-                )
+                child = leaf.best_child(self.config.exploration_constant)
 
             if child is None:
-                leaf.is_terminal = True
-                leaf.backpropagate(self._evaluate(leaf.state))
                 simulations_completed += 1
                 continue
 
             child_depth = depth + 1
+            maximum_depth = max(maximum_depth, child_depth)
+
             child.is_terminal = self._is_terminal(
                 child.state,
                 child_depth,
             )
 
-            child_reward = self._evaluate(child.state)
+            if child.is_terminal:
+                terminal_nodes += 1
+
+            reward = self._evaluate(child.state)
+
+            evaluated_rewards.append(reward)
+            evaluated_states.add(child.state)
+            candidates_evaluated += 1
+
+            discounted_reward = (
+                reward * self.config.discount_factor ** child_depth
+            )
+
+            child.backpropagate(discounted_reward)
 
             trace.record(
                 state=child.state,
                 depth=child_depth,
                 event="candidate_evaluated",
-                reward=child_reward,
+                reward=reward,
                 prior=child.prior,
             )
 
-            if child.state not in evaluated_states:
-                evaluated_states.add(child.state)
-                candidates_evaluated += 1
-                reward_sum += child_reward
-
-            maximum_depth_reached = max(
-                maximum_depth_reached,
-                child_depth,
-            )
-
-            # Apply discount according to how far this candidate is from
-            # the root. All ancestors receive the same discounted outcome.
-            discounted_reward = (
-                child_reward
-                * self.config.discount_factor ** child_depth
-            )
-
-            child.backpropagate(discounted_reward)
             simulations_completed += 1
 
-        # Select the most-visited root child as the final candidate.
-       
-        # Select the root candidate with the highest average search value.
-        # Break ties by preferring the more-visited candidate.
-        if not root.children:
-            best_state = initial_state
-            best_value = root.value
-        else:
+        if root.children:
             best_child = max(
                 root.children.values(),
                 key=lambda child: (child.value, child.visit_count),
             )
             best_state = best_child.state
             best_value = best_child.value
-            trace.mark_selected(best_state)
+        else:
+            best_state = initial_state
+            best_value = root.value
+
+        nodes = self._collect_nodes(root)
+
+        trace.mark_selected(best_state)
+
+        diagnostics = MCTSDiagnostics(
+            nodes_explored=len(nodes),
+            candidates_evaluated=candidates_evaluated,
+            terminal_nodes=terminal_nodes,
+            maximum_depth_reached=maximum_depth,
+            unique_states=len(evaluated_states),
+            average_reward=(
+                sum(evaluated_rewards) / len(evaluated_rewards)
+                if evaluated_rewards else 0.0
+            ),
+        )
 
         return MCTSResult(
             root=root,
@@ -355,15 +337,3 @@ class MCTSSearch:
             diagnostics=diagnostics,
             trace=trace,
         )
-
-@dataclass
-class MCTSDiagnostics:
-    """Statistics describing an MCTS search."""
-
-    nodes_explored: int = 0
-    candidates_evaluated: int = 0
-    terminal_nodes: int = 0
-    maximum_depth_reached: int = 0
-    unique_states: int = 0
-    average_reward: float = 0.0
-

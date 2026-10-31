@@ -1,13 +1,14 @@
+
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from functools import lru_cache
 
 from reasoning.discriminator import DiscriminatorScorer
 from reasoning.mcts.search import MCTSConfig, MCTSResult, MCTSSearch
 from reasoning.policy import PolicyCandidateGenerator
 from reasoning.reward import RewardConfig, calculate_reward
+
 
 @dataclass
 class RStarConfig:
@@ -52,7 +53,10 @@ class RStarConfig:
             ("penalty_weight", self.penalty_weight),
         ):
             if not math.isfinite(value) or value < 0:
-                raise ValueError(f"{name} must be finite and non-negative")
+                raise ValueError(
+                    f"{name} must be finite and non-negative"
+                )
+
 
 @dataclass
 class RStarResult:
@@ -103,3 +107,126 @@ class RStarResult:
             },
             "trace": self.trace.to_dict(),
         }
+
+
+@dataclass
+class RStarReasoner:
+    """MCTS-based reasoning engine for IronFist1."""
+
+    def __init__(
+        self,
+        policy_generator: PolicyCandidateGenerator,
+        discriminator: DiscriminatorScorer,
+        config: RStarConfig | None = None,
+        consistency_checker=None,
+        penalty_checker=None,
+        terminal_checker=None,
+    ):
+        self.policy_generator = policy_generator
+        self.discriminator = discriminator
+        self.config = config or RStarConfig()
+
+        self.consistency_checker = consistency_checker
+        self.penalty_checker = penalty_checker
+        self.terminal_checker = terminal_checker
+
+        self.reward_config = RewardConfig(
+            discriminator_weight=self.config.discriminator_weight,
+            consistency_weight=self.config.consistency_weight,
+            penalty_weight=self.config.penalty_weight,
+        )
+
+        self.search_config = MCTSConfig(
+            num_simulations=self.config.num_simulations,
+            max_search_depth=self.config.max_search_depth,
+            max_candidates_per_node=self.config.max_candidates_per_node,
+            exploration_constant=self.config.exploration_constant,
+            discount_factor=self.config.discount_factor,
+        )
+
+    def _discriminator_score(self, state: str) -> float:
+        score = float(self.discriminator.score(state))
+
+        if not math.isfinite(score):
+            raise ValueError("Discriminator returned a non-finite score")
+
+        return score
+
+    def _consistency_score(self, state: str) -> float:
+        checker = self.consistency_checker
+
+        if checker is None:
+            checker = getattr(
+                self.policy_generator,
+                "consistency_score",
+                None,
+            )
+
+        if checker is None:
+            return 0.0
+
+        score = float(checker(state))
+
+        if not math.isfinite(score):
+            raise ValueError("Consistency score must be finite")
+
+        return score
+
+    def _penalty(self, state: str) -> float:
+        if self.penalty_checker is None:
+            return 0.0
+
+        penalty = float(self.penalty_checker(state))
+
+        if not math.isfinite(penalty) or penalty < 0:
+            raise ValueError(
+                "Penalty must be finite and non-negative"
+            )
+
+        return penalty
+
+    def _reward(self, state: str) -> float:
+        return float(
+            calculate_reward(
+                discriminator_score=self._discriminator_score(state),
+                consistency_score=self._consistency_score(state),
+                penalty=self._penalty(state),
+                config=self.reward_config,
+            )
+        )
+
+    def reason(self, prompt: str) -> RStarResult:
+        if not isinstance(prompt, str):
+            raise ValueError("prompt must be a string")
+
+        if not prompt.strip():
+            raise ValueError("prompt cannot be empty")
+
+        search = MCTSSearch(
+            candidate_generator=self.policy_generator,
+            evaluator=self._reward,
+            config=self.search_config,
+            terminal_checker=self.terminal_checker,
+        )
+
+        search_result = search.search(prompt)
+        best_state = search_result.best_state
+
+        if best_state.startswith(prompt):
+            answer = best_state[len(prompt):].strip()
+        else:
+            answer = best_state
+
+        discriminator_score = self._discriminator_score(best_state)
+        reward = self._reward(best_state)
+
+        return RStarResult(
+            prompt=prompt,
+            answer=answer,
+            reward=reward,
+            discriminator_score=discriminator_score,
+            search_result=search_result,
+        )
+
+    def __call__(self, prompt: str) -> str:
+        return self.reason(prompt).answer
